@@ -18,6 +18,12 @@ RECORDINGS_DIR = Path("~/projekts/httprequests/recordings").expanduser()
 DEFAULT_OUT = Path("~/projekts/sandbox/annotated").expanduser()
 PREVIEW_W, PREVIEW_H = 960, 540
 CROP_COLORS = {(800, 600): "#ffb000", (640, 480): "#00c8ff", (320, 240): "#ff4fd8"}
+LAYER_COLORS = {(1280, 720): "#00ff00", **CROP_COLORS}  # detection preview, one colour per size
+
+
+def hex_to_bgr(color):
+    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    return (b, g, r)
 
 
 class App:
@@ -131,8 +137,8 @@ class App:
             row = ttk.Frame(sizes)
             row.pack(anchor="w")
             ttk.Checkbutton(row, text=label, variable=var, takefocus=False).pack(side="left")
-            if size in CROP_COLORS:
-                tk.Label(row, text="■", fg=CROP_COLORS[size]).pack(side="left")
+            if size in LAYER_COLORS:
+                tk.Label(row, text="■", fg=LAYER_COLORS[size]).pack(side="left")
 
         self.show_det = tk.BooleanVar(value=False)
         self.show_det_cb = ttk.Checkbutton(right, text="Show detections in preview", variable=self.show_det,
@@ -325,18 +331,23 @@ class App:
                                 fg="#d00000" if marked else "black")
         self.mark_btn.config(text="Unmark (Space)" if marked else "Mark (Space)")
 
+    def _checked_sizes(self):
+        return [s for s in ann.CROP_SIZES if self.size_vars[s].get()]  # largest first
+
     def _request_detection(self):
-        # one detection at a time; when it finishes, re-run if the frame changed meanwhile
+        # one detection at a time; when it finishes, re-run if frame or sizes changed meanwhile
         if self.det_running:
             return
         self.det_running = True
         video, idx, frame, model = self.video_path, self.idx, self.frame, self.model
+        sizes = self._checked_sizes()
+        layers = [(s, hex_to_bgr(LAYER_COLORS[s])) for s in sizes]
 
         def work():
             try:
                 with self.model_lock:
-                    img = ann.annotate(model, frame)
-                self.q.put(("preview", video, idx, img))
+                    img = ann.annotate_overlay(model, frame, layers)
+                self.q.put(("preview", video, idx, sizes, img))
             except Exception as e:
                 self.q.put(("preview_error", str(e)))
 
@@ -411,9 +422,10 @@ class App:
                         self._set_status(f"Failed to load model {name}: {err}")
                         self._update_controls()
                 elif kind == "preview":
-                    _, video, idx, img = msg
+                    _, video, idx, sizes, img = msg
                     self.det_running = False
-                    if (video, idx) == (self.video_path, self.idx) and self.show_det.get():
+                    current = (self.video_path, self.idx, self._checked_sizes())
+                    if (video, idx, sizes) == current and self.show_det.get():
                         self._show(img)
                     elif self.show_det.get():
                         self.render()

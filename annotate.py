@@ -44,8 +44,12 @@ def center_crop(frame, w, h):
     return frame[y0:y0 + h, x0:x0 + w].copy()
 
 
+def _predict(model, img):
+    return model.predict(img, classes=[0], conf=0.1, iou=0.5, verbose=False)
+
+
 def annotate(model, frame, frame_idx=None):
-    results = model.predict(frame, classes=[0], conf=0.1, iou=0.5, verbose=False)
+    results = _predict(model, frame)
     annotated = results[0].plot()
 
     h, w = annotated.shape[:2]
@@ -73,6 +77,40 @@ def annotate(model, frame, frame_idx=None):
         (tw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
         put_text(annotated, label, (w - tw - 10, h - 20), scale, (255, 255, 255), thickness)
     return annotated
+
+
+def annotate_overlay(model, frame, layers):
+    """Preview: detect on each centred crop and draw all results on one full frame.
+
+    layers: [((w, h), bgr_color), ...], largest first. Each layer's boxes, midline
+    and upper/lower counts are computed on its own crop, as when saving that size.
+    """
+    out = frame.copy()
+    H, W = frame.shape[:2]
+    layers = [(size, color) for size, color in layers if size[0] <= W and size[1] <= H]
+    for i, ((w, h), color) in enumerate(layers):
+        x0, y0 = (W - w) // 2, (H - h) // 2
+        mid_y = h // 2
+        results = _predict(model, center_crop(frame, w, h))
+
+        # centred crops share the same midline; larger layers are drawn thicker underneath
+        cv2.line(out, (x0, y0 + mid_y), (x0 + w, y0 + mid_y), color, 2 * (len(layers) - i))
+
+        in_upper = in_lower = 0
+        boxes = results[0].boxes
+        for box, conf in zip(boxes.xyxy, boxes.conf):
+            if float((box[1] + box[3]) / 2) < mid_y:  # same test as annotate()
+                in_upper += 1
+            else:
+                in_lower += 1
+            x1, y1, x2, y2 = (int(v) for v in box)
+            cv2.rectangle(out, (x0 + x1, y0 + y1), (x0 + x2, y0 + y2), color, 2)
+            # inside the box, one row per layer, so labels of overlapping boxes don't collide
+            put_text(out, f"{float(conf):.2f}", (x0 + x1 + 4, y0 + y1 + 22 + 24 * i), 0.6, color, 2)
+
+        put_text(out, f"{w}x{h}  up: {in_upper}  low: {in_lower}", (x0 + 10, y0 + 55),
+                 0.7, color, 2)
+    return out
 
 
 def output_path(out_dir, video_path, idx, size, full_size):
