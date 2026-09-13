@@ -368,10 +368,10 @@ class App:
         self.progress.config(maximum=len(marks) * len(sizes), value=0)
         self._set_status(f"Annotating {len(marks)} frame(s) × {len(sizes)} size(s)…")
         self._update_controls()
-        args = (self.video_path, marks, sizes, self.out_dir, self.model)
+        args = (self.video_path, marks, sizes, self.out_dir, self.model, self.model_name)
         threading.Thread(target=self._save_worker, args=args, daemon=True).start()
 
-    def _save_worker(self, video, marks, sizes, out_dir, model):
+    def _save_worker(self, video, marks, sizes, out_dir, model, model_name):
         cap = cv2.VideoCapture(str(video))
         done = saved = 0
         skipped, errors = set(), []
@@ -388,7 +388,7 @@ class App:
                     try:
                         crop = ann.center_crop(frame, *size)
                         with self.model_lock:
-                            img = ann.annotate(model, crop, idx)
+                            img = ann.annotate(model, crop, idx, model_name)
                         ann.save_jpg(ann.output_path(out_dir, video, idx, size, full), img)
                         saved += 1
                     except ValueError:

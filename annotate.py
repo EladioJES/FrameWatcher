@@ -48,7 +48,7 @@ def _predict(model, img):
     return model.predict(img, classes=[0], conf=0.1, iou=0.5, verbose=False)
 
 
-def annotate(model, frame, frame_idx=None):
+def annotate(model, frame, frame_idx=None, model_name=None):
     results = _predict(model, frame)
     annotated = results[0].plot()
 
@@ -68,14 +68,28 @@ def annotate(model, frame, frame_idx=None):
     # detect.py uses scale 0.7 on 640-wide frames; shrink on narrow crops so text fits
     scale = max(0.45, 0.7 * min(1.0, w / 640))
     thickness = 2 if scale >= 0.6 else 1
-    put_text(annotated, f"In upper: {in_upper}", (10, int(40 * scale / 0.7) + 10),
-             scale, (0, 255, 0), thickness)
+    upper_label = f"In upper: {in_upper}"
+    top_y = int(40 * scale / 0.7) + 10
+    put_text(annotated, upper_label, (10, top_y), scale, (0, 255, 0), thickness)
     put_text(annotated, f"In lower: {in_lower}", (10, h - 20), scale, (0, 255, 0), thickness)
 
     if frame_idx is not None:
         label = f"frame {frame_idx}"
         (tw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
         put_text(annotated, label, (w - tw - 10, h - 20), scale, (255, 255, 255), thickness)
+
+    if model_name is not None:
+        # top-right: the size the detection ran on (this image) and the model;
+        # split into two right-aligned lines if one would run into "In upper"
+        (upper_w, _), _ = cv2.getTextSize(upper_label, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+        lines = [f"{w}x{h} | {model_name}"]
+        (tw, th), _ = cv2.getTextSize(lines[0], cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+        if w - tw - 10 < 10 + upper_w + 20:
+            lines = [f"{w}x{h}", model_name]
+        for i, line in enumerate(lines):
+            (tw, _), _ = cv2.getTextSize(line, cv2.FONT_HERSHEY_SIMPLEX, scale, thickness)
+            put_text(annotated, line, (w - tw - 10, top_y + i * (th + 10)),
+                     scale, (255, 255, 255), thickness)
     return annotated
 
 
